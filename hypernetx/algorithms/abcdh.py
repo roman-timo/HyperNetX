@@ -409,7 +409,7 @@ def config_model(clusters, params, he1):
             else:
                 other_edge = random.choice(list(good_edges))
                 good_edges.remove(other_edge)
-                new_split = [*bad_edge, *other_edge]
+                new_split: list[int] = [*bad_edge, *other_edge]
                 random.shuffle(new_split)
                 new1 = tuple(sorted(new_split[: len(bad_edge)]))
                 new2 = tuple(sorted(new_split[len(bad_edge):]))
@@ -659,3 +659,5 @@ if __name__ == "__main__":
     )
     print("hyperedges\n", he, "\n\n")
     print("clusters\n", cl, "\n\n")
+
+    print(len(he))
