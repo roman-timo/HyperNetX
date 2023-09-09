@@ -1,7 +1,7 @@
+from math import floor, ceil, comb, copysign
 import random
 import warnings
 import numpy as np
-from math import floor, ceil, comb, copysign
 
 
 RHS_CACHE = dict[tuple[int, int, int, int], float]()
@@ -12,17 +12,16 @@ COMB_ALLOWED_CACHE = dict[tuple[int, int, int, int], float]()
 class ABCDH_params:
     """
         ABCDHParams
-
     A structure holding parameters for ABCD graph generator. Fields:
-    * is_simple::Bool:            if hypergraph is simple
-    * w::Vector{Int}:             list of vertex degrees
-    * y::Vector{Int}:             community degree
-    * z::Vector{Int}:             network degree
-    * s::Vector{Int}:             list of cluster sizes
-    * x::Union{Float64, Nothing}: background graph fraction
-    * q::Vector{Float64}:         distribution of hyperedge sizes
-    * wcd::Matrix{Float64}: desired composition of hyperedges
-    * maxiter: maximum number of iterations trying to resolve collisions per collision
+    * is_simple:bool            if hypergraph is simple
+    * w:list[int]               list of vertex degrees
+    * y:list[int]               community degree
+    * z:list[int]               network degree
+    * s:list[int]               list of cluster sizes
+    * x:float | None            background graph fraction
+    * q:list[float]             distribution of hyperedge sizes
+    * wcd:ndarray[float, float] desired composition of hyperedges
+    * maxiter:int               maximum number of iterations trying to resolve collisions per collision
     """
 
     def __init__(self, w, s, x, q, wcd, is_simple, maxiter):
@@ -33,6 +32,8 @@ class ABCDH_params:
         self.wcd = wcd
         self.is_simple = is_simple
         self.maxiter = maxiter
+        self.y = np.full(len(w), -1, dtype=int)
+        self.z = np.full(len(w), -1, dtype=int)
 
         if len(w) != sum(s):
             warnings.warn(f"inconsistent data w {len(w)} and s {sum(s)}")
@@ -84,12 +85,6 @@ class ABCDH_params:
                     f"sum of hyperedge composition {swcd} is abnormally small for d={d}"
                 )
                 w[:, d] = [i / swcd for i in w[:, d]]
-
-        y_vector = np.empty(len(w), dtype=int)
-        y_vector.fill(-1)
-
-        self.y = y_vector
-        self.z = y_vector
 
 
 def get_rhs(n, cj, d, c):
@@ -146,19 +141,14 @@ def generate_1hyperedges(params):
 
 def populate_clusters(params):
     # Note that populate_clusters is not thread safe
-    RHS_CACHE = dict[tuple[int, int, int, int], float]()
-    LHS_CACHE = dict[tuple[int, int, int, int], float]()
-    COMB_ALLOWED_CACHE = dict[tuple[int, int, int, int], float]()
+    RHS_CACHE.clear()
+    LHS_CACHE.clear()
+    COMB_ALLOWED_CACHE.clear()
 
     n = len(params.w)
-
-    clusters = np.empty(n, dtype=int)
-    clusters.fill(-1)
-
+    clusters = np.full(n, -1, dtype=int)
     slots = np.copy(params.s)
-
-    community_allowed = np.empty(len(slots))
-    community_allowed.fill(True)
+    community_allowed = np.full(len(slots), True)
 
     for i in sorted(range(len(params.w)), key=lambda k: params.w[k], reverse=True):
         loc = -1
@@ -205,10 +195,10 @@ def config_model(clusters, params, he1):
     ]()  # partial edges with missing d-c slots
 
     for j in range(len(params.s)):
-        cluster_idxs = np.nonzero(clusters == j)[0]
+        cluster_idxs = np.where(clusters == j)[0]
 
         md = np.zeros(L, dtype=int)
-        pj = sum([params.y[i] for i in cluster_idxs])
+        pj = sum(params.y[i] for i in cluster_idxs)
         for d in range(L - 1, 0, -1):
             sumq2 = sum(params.q[1 : d + 1])
             if sumq2 > 0:
@@ -218,7 +208,7 @@ def config_model(clusters, params, he1):
                 ]
                 md[d] = floor(params.q[d] / sumq2 * (pj - sum(new_md)) / d)
 
-        sumpj = sum([d * md[d] for d in range(L)])
+        sumpj = sum(d * md[d] for d in range(L))
         if pj > sumpj:
             print(f"Moving {pj - sumpj} stumps from community {j} to background graph")
 
@@ -235,7 +225,7 @@ def config_model(clusters, params, he1):
         assert pj == sumpj
 
         if pj == 0:
-            assert sum([params.y[i] for i in cluster_idxs]) == 0
+            assert sum(params.y[i] for i in cluster_idxs) == 0
         else:
             mcd = np.zeros((L, L), dtype=int)
             for d in range(1, L):
@@ -248,20 +238,9 @@ def config_model(clusters, params, he1):
 
                 assert md[d] == sum(mcd[:, d])
 
-            assert (
-                sum(
-                    [
-                        d * mcd[c, d]
-                        for d in range(1, L)
-                        for c in range(d, (d - 1) // 2, -1)
-                    ]
-                )
-                == pj
-            )
+            assert (sum(d * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1)) == pj)
 
-            pjc = sum(
-                [c * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1)]
-            )
+            pjc = sum(c * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1))
 
             yc = [params.y[i] * pjc / pj for i in cluster_idxs]
             yc_base = [floor(yc_) for yc_ in yc]
@@ -343,8 +322,8 @@ def config_model(clusters, params, he1):
             ]
             md[d] = floor(params.q[d] / sumq2 * (p - sum(new_md)) / d)
 
-    for index in range(len(params.z)):
-        background_stumps.extend(np.full(params.z[index], index))
+    for index, value in enumerate(params.z):
+        background_stumps.extend(np.full(value, index))
 
     random.shuffle(background_stumps)
 
@@ -357,7 +336,7 @@ def config_model(clusters, params, he1):
             stump_idx += d
 
     if stump_idx + 1 <= len(background_stumps):
-        left_stumps = background_stumps[stump_idx - 1 :]
+        left_stumps = background_stumps[stump_idx - 1:]
         # note that these size-1 hyperedges might be duplicate with he1 generated earlier
         if params.q[0] > 0 and (
             not params.is_simple
@@ -368,7 +347,7 @@ def config_model(clusters, params, he1):
         else:
             find_first = 0
             find_some = [i for i in range(len(params.q[1:])) if params.q[i] > 0]
-            if len(find_some):
+            if find_some:
                 find_first = find_some[0]
             targetq = 1 + find_first
             to_add = targetq - len(left_stumps)
@@ -418,7 +397,7 @@ def config_model(clusters, params, he1):
 
         iters = params.maxiter * len(bad_edges)
         for _ in range(iters):
-            if not len(bad_edges):
+            if not bad_edges:
                 break
 
             bad_edge = bad_edges.pop()
@@ -428,38 +407,34 @@ def config_model(clusters, params, he1):
             if initial_badness == 0:
                 good_edges.add(tuple(bad_edge))
             else:
-                other_edge = random.sample(list(good_edges), k=1)[0]
+                other_edge = random.choice(list(good_edges))
                 good_edges.remove(other_edge)
-                new_split = [*bad_edge, *list(other_edge)]
+                new_split = [*bad_edge, *other_edge]
                 random.shuffle(new_split)
-                new1 = sorted(new_split[: len(bad_edge)])
-                new2 = sorted(new_split[len(bad_edge) :])
+                new1 = tuple(sorted(new_split[: len(bad_edge)]))
+                new2 = tuple(sorted(new_split[len(bad_edge):]))
                 final_bandess = (
-                    (new1 in list(good_edges))
+                    (new1 in good_edges)
                     + (len(new1) - len(np.unique(new1)))
-                    + (new2 in list(good_edges))
+                    + (new2 in good_edges)
                     + (len(new2) - len(np.unique(new2)))
                 )
                 if final_bandess < initial_badness:
-                    if len(new1) == len(np.unique(new1)) and tuple(new1) not in list(
-                        good_edges
-                    ):
-                        good_edges.add(tuple(new1))
+                    if len(new1) == len(np.unique(new1)) and new1 not in good_edges:
+                        good_edges.add(new1)
                     else:
-                        bad_edges.append(new1)
+                        bad_edges.append(list(new1))
 
-                    if len(new2) == len(np.unique(new2)) and tuple(new2) not in list(
-                        good_edges
-                    ):
-                        good_edges.add(tuple(new2))
+                    if len(new2) == len(np.unique(new2)) and new2 not in good_edges:
+                        good_edges.add(new2)
                     else:
-                        bad_edges.append(new2)
+                        bad_edges.append(list(new2))
 
                 else:
                     bad_edges.insert(0, bad_edge)
-                    good_edges.add(tuple(other_edge))
+                    good_edges.add(other_edge)
 
-        if len(bad_edges):
+        if bad_edges:
             print(
                 f"""Failed to fix all bad edges in {params.maxiter} rounds.
                   Dropping {len(bad_edges)} bad edges that violated
@@ -482,15 +457,16 @@ def trunc_powerlaw_weigths(a, v_min, v_max):
 
 
 def sample_trunc_powerlaw(a, v_min, v_max, n):
-    if type(a) == list:
+
+    if isinstance(a, list):
         assert n > 0
         return random.choices(range(v_min, v_max + 1), k=n, weights=a)
-    else:
-        assert a >= 1
-        assert 1 <= v_min <= v_max
-        assert n > 0
-        w = [1 / i**a for i in range(v_min, v_max + 1)]
-        return random.choices(range(v_min, v_max + 1), k=n, weights=w)
+
+    assert a >= 1
+    assert 1 <= v_min <= v_max
+    assert n > 0
+    w = [1 / i**a for i in range(v_min, v_max + 1)]
+    return random.choices(range(v_min, v_max + 1), k=n, weights=w)
 
 
 def sample_degrees(t1, d_min, d_max, n):
@@ -576,7 +552,7 @@ def sample_communities(t2, c_min, c_max, n, max_iter):
 
 def gen_hypergraph(params):
     """
-        gen_hypergraph(params::ABCDHParams)
+        gen_hypergraph(params:ABCDHParams)
 
     Generate ABCD hypergraph following parameters specified in `params`.
 
@@ -584,8 +560,7 @@ def gen_hypergraph(params):
     assignments of the vertices.
     The ordering of vertices and clusters is in descending order (as in `params`).
     """
-    he1 = list[list[int]]()
-    he1 = generate_1hyperedges(params)
+    he1: list[list[int]] = generate_1hyperedges(params)
 
     for i, _ in enumerate(params.w):
         params.z[i] = randround(params.x * params.w[i])
@@ -597,7 +572,7 @@ def gen_hypergraph(params):
     return hyperedges, clusters
 
 
-def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False, stats=False, prefix=None):
+def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False):
     if not np.issubdtype(type(seed), np.integer):
         warnings.warn("seed must be an integer")
     random.seed(seed)
@@ -607,7 +582,6 @@ def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False, stats=False, prefix=N
     if n <= 0:
         warnings.warn("Number of vertices must be positive")
 
-    degs = []
     if len(dss) == 3:
         g = dss[0]
         if not np.issubdtype(type(g), np.float64):
@@ -623,9 +597,8 @@ def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False, stats=False, prefix=N
         if not 0 < d <= D:
             warnings.warn("Condition 0 < d <= D not met")
 
-        degs = sample_degrees(g, d, D, n)
+        degs: list = sample_degrees(g, d, D, n)
 
-    coms = []
     if len(css) == 3:
         b = css[0]
         if not np.issubdtype(type(b), np.float64):
@@ -641,7 +614,7 @@ def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False, stats=False, prefix=N
         if not d <= s <= S:
             warnings.warn("Condition d <= s <= S not met")
 
-        coms = sample_communities(b, s, S, n, 1000)
+        coms: list = sample_communities(b, s, S, n, 1000)
 
     if n != sum(coms):
         warnings.warn(
@@ -676,9 +649,9 @@ def abcdh_hypergraph(n, dss, css, x, q, ws, seed, m=False, stats=False, prefix=N
 
 if __name__ == "__main__":
     he, cl = abcdh_hypergraph(
-        1000,
-        [2.5, 5, 10],
-        [1.5, 10, 100],
+        10000,
+        [2.5, 5, 100],
+        [1.5, 100, 1000],
         0.5,
         [0.0, 0.4, 0.3, 0.2, 0.1],
         ":linear",
