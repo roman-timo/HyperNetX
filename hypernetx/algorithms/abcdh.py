@@ -9,6 +9,80 @@ LHS_CACHE = dict[tuple[int, int, int, int], float]()
 COMB_ALLOWED_CACHE = dict[tuple[int, int, int, int], float]()
 
 
+class ABCDH_params:
+    """
+        ABCDHParams
+
+    A structure holding parameters for ABCD graph generator. Fields:
+    * is_simple::Bool:            if hypergraph is simple
+    * w::Vector{Int}:             list of vertex degrees
+    * y::Vector{Int}:             community degree
+    * z::Vector{Int}:             network degree
+    * s::Vector{Int}:             list of cluster sizes
+    * x::Union{Float64, Nothing}: background graph fraction
+    * q::Vector{Float64}:         distribution of hyperedge sizes
+    * wcd::Matrix{Float64}: desired composition of hyperedges
+    * maxiter: maximum number of iterations trying to resolve collisions per collision
+    """
+
+    def __init__(self, w, s, x, q, wcd, is_simple, maxiter):
+        self.w = w
+        self.s = s
+        self.x = x
+        self.q = q
+        self.wcd = wcd
+        self.is_simple = is_simple
+        self.maxiter = maxiter
+
+        if len(w) != sum(s):
+            warnings.warn(f"inconsistent data w {len(w)} and s {sum(s)}")
+        if not all(_ >= 0 for _ in w):
+            warnings.warn("negative degree passed")
+        if not all(_ >= 0 for _ in s):
+            warnings.warn("negative community size passed")
+        if not all(_ >= 0 for _ in q):
+            warnings.warn("negative hyperedge proportion passed")
+        if not np.all(wcd >= 0):
+            warnings.warn("negative hyperedge composition passed")
+        if not 0 <= x <= 1:
+            warnings.warn(f"x={x} not in [0,1] interval")
+
+        sq = sum(q)
+        if sq != 1:
+            warnings.warn(f"distribution of hyperedge proportions {sq} does not add up to 1. Fixing.")
+
+            if sq < np.finfo(np.float32).eps:
+                warnings.warn("sum of hyperedge proportions is abnormally small")
+            q = [q_/sq for q_ in q]
+
+        if np.shape(wcd) != (len(q), len(q)):
+            warnings.warn("incorrect dimension of hyperedge composition matrix")
+
+        for d in range(len(q)):
+            for c in range(d//2):
+                if wcd[c, d] != 0:
+                    warnings.warn(f"weight for c <= d/2 is positive where c={c} and d={d}. Fixing.")
+                    wcd[c, d] = 0.0
+            for c in range(d + 1, len(q)):
+                if wcd[c, d] != 0:
+                    warnings.warn(f"weight for c > d is positive where c={c} and d={d}. Fixing.")
+                    wcd[c, d] = 0.0
+
+            swcd = sum(wcd[:, d])
+            if swcd != 1:
+                warnings.warn(f"distribution of hyperedge composition for d={d} does not add up to 1. Fixing.")
+            if swcd < np.finfo(np.float32).eps:
+                warnings.warn(f"sum of hyperedge composition {swcd} is abnormally small for d={d}")
+                w[:, d] = [i / swcd for i in w[:, d]]
+
+        y_vector = np.empty(len(w), dtype=int)
+        y_vector.fill(-1)
+
+        self.y = y_vector
+        self.z = y_vector
+
+
+
 def get_rhs(n, cj, d, c):
     if (n, cj, d, c) not in RHS_CACHE:
         RHS_CACHE[(n, cj, d, c)] = comb(cj, c) * comb(n - cj, d - c)
@@ -421,79 +495,6 @@ def sample_communities(t2, c_min, c_max, n, max_iter):
         best_ss += change
         best_s[i] += change
     return sorted(best_s, reverse=True)
-
-
-class ABCDH_params:
-    """
-        ABCDHParams
-
-    A structure holding parameters for ABCD graph generator. Fields:
-    * is_simple::Bool:            if hypergraph is simple
-    * w::Vector{Int}:             list of vertex degrees
-    * y::Vector{Int}:             community degree
-    * z::Vector{Int}:             network degree
-    * s::Vector{Int}:             list of cluster sizes
-    * x::Union{Float64, Nothing}: background graph fraction
-    * q::Vector{Float64}:         distribution of hyperedge sizes
-    * wcd::Matrix{Float64}: desired composition of hyperedges
-    * maxiter: maximum number of iterations trying to resolve collisions per collision
-    """
-
-    def __init__(self, w, s, x, q, wcd, is_simple, maxiter):
-        self.w = w
-        self.s = s
-        self.x = x
-        self.q = q
-        self.wcd = wcd
-        self.is_simple = is_simple
-        self.maxiter = maxiter
-
-        if len(w) != sum(s):
-            warnings.warn(f"inconsistent data w {len(w)} and s {sum(s)}")
-        if not all(_ >= 0 for _ in w):
-            warnings.warn("negative degree passed")
-        if not all(_ >= 0 for _ in s):
-            warnings.warn("negative community size passed")
-        if not all(_ >= 0 for _ in q):
-            warnings.warn("negative hyperedge proportion passed")
-        if not np.all(wcd >= 0):
-            warnings.warn("negative hyperedge composition passed")
-        if not 0 <= x <= 1:
-            warnings.warn(f"x={x} not in [0,1] interval")
-
-        sq = sum(q)
-        if sq != 1:
-            warnings.warn(f"distribution of hyperedge proportions {sq} does not add up to 1. Fixing.")
-
-            if sq < np.finfo(np.float32).eps:
-                warnings.warn("sum of hyperedge proportions is abnormally small")
-            q = [q_/sq for q_ in q]
-
-        if np.shape(wcd) != (len(q), len(q)):
-            warnings.warn("incorrect dimension of hyperedge composition matrix")
-
-        for d in range(len(q)):
-            for c in range(d//2):
-                if wcd[c, d] != 0:
-                    warnings.warn(f"weight for c <= d/2 is positive where c={c} and d={d}. Fixing.")
-                    wcd[c, d] = 0.0
-            for c in range(d + 1, len(q)):
-                if wcd[c, d] != 0:
-                    warnings.warn(f"weight for c > d is positive where c={c} and d={d}. Fixing.")
-                    wcd[c, d] = 0.0
-
-            swcd = sum(wcd[:, d])
-            if swcd != 1:
-                warnings.warn(f"distribution of hyperedge composition for d={d} does not add up to 1. Fixing.")
-            if swcd < np.finfo(np.float32).eps:
-                warnings.warn(f"sum of hyperedge composition {swcd} is abnormally small for d={d}")
-                w[:, d] = [i / swcd for i in w[:, d]]
-
-        y_vector = np.empty(len(w), dtype=int)
-        y_vector.fill(-1)
-
-        self.y = y_vector
-        self.z = y_vector
 
 
 def gen_hypergraph(params):
