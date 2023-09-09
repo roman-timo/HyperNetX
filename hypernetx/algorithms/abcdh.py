@@ -238,9 +238,18 @@ def config_model(clusters, params, he1):
 
                 assert md[d] == sum(mcd[:, d])
 
-            assert (sum(d * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1)) == pj)
+            assert (
+                sum(
+                    d * mcd[c, d]
+                    for d in range(1, L)
+                    for c in range(d, (d - 1) // 2, -1)
+                )
+                == pj
+            )
 
-            pjc = sum(c * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1))
+            pjc = sum(
+                c * mcd[c, d] for d in range(1, L) for c in range(d, (d - 1) // 2, -1)
+            )
 
             yc = [params.y[i] * pjc / pj for i in cluster_idxs]
             yc_base = [floor(yc_) for yc_ in yc]
@@ -336,7 +345,7 @@ def config_model(clusters, params, he1):
             stump_idx += d
 
     if stump_idx + 1 <= len(background_stumps):
-        left_stumps = background_stumps[stump_idx - 1:]
+        left_stumps = background_stumps[stump_idx - 1 :]
         # note that these size-1 hyperedges might be duplicate with he1 generated earlier
         if params.q[0] > 0 and (
             not params.is_simple
@@ -412,7 +421,7 @@ def config_model(clusters, params, he1):
                 new_split: list[int] = [*bad_edge, *other_edge]
                 random.shuffle(new_split)
                 new1 = tuple(sorted(new_split[: len(bad_edge)]))
-                new2 = tuple(sorted(new_split[len(bad_edge):]))
+                new2 = tuple(sorted(new_split[len(bad_edge) :]))
                 final_bandess = (
                     (new1 in good_edges)
                     + (len(new1) - len(np.unique(new1)))
@@ -457,7 +466,6 @@ def trunc_powerlaw_weigths(a, v_min, v_max):
 
 
 def sample_trunc_powerlaw(a, v_min, v_max, n):
-
     if isinstance(a, list):
         assert n > 0
         return random.choices(range(v_min, v_max + 1), k=n, weights=a)
